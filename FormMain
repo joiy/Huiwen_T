@@ -1,0 +1,686 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.Linq;
+using System.Text;
+using System.Windows.Forms;
+using System.IO;
+using System.Configuration;
+using System.Data.SqlClient;
+using System.Net;
+
+
+namespace Huiwen_T
+{
+    public partial class FormMain : Form
+    {
+        public FormMain()
+        {
+            InitializeComponent();
+        }
+        string connStr = ConfigurationManager.ConnectionStrings["str"].ConnectionString;
+        string ftpuser = ConfigurationManager.ConnectionStrings["username"].ConnectionString;
+        string ftppwd = ConfigurationManager.ConnectionStrings["password"].ConnectionString;
+        string ftpurl = ConfigurationManager.ConnectionStrings["targetDir"].ConnectionString;
+        string ftphost = ConfigurationManager.ConnectionStrings["hostname"].ConnectionString;
+        string str = Application.StartupPath + "\\huiwen.ini";
+
+        #region 浏览被单击
+        /// <summary>
+        /// 当浏览被单击
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void btnBrowse_Click(object sender, EventArgs e)
+        {
+            if (comboBox1.Text != "")
+            {
+                //openFileDialog1.Title = "请选择退单文件";
+                //openFileDialog1.Filter = "*.PDF|";
+                //openFileDialog1.FilterIndex = 50;
+                //openFileDialog1.ShowDialog();
+                folderBrowserDialog1.Description = "请选择文件目录";
+                folderBrowserDialog1.RootFolder = System.Environment.SpecialFolder.Desktop;
+                //folderBrowserDialog1.ShowDialog();
+
+                if (folderBrowserDialog1.ShowDialog() == DialogResult.OK)
+                {
+                    //加载之前清空数据
+                    dataGridView1.Rows.Clear();
+
+                    // 在此添加代码,选择的路径为 folderBrowserDialog1.SelectedPath
+                    txtUrl.Text = folderBrowserDialog1.SelectedPath + "\\";
+                    var url = txtUrl.Text;
+                    int i = 0;
+                    foreach (string item in Directory.GetFiles(url, "*.PDF"))
+                    {
+                        string[] a = item.Split('\\');
+                        string[] b = a[a.Length - 1].Split('.');
+                        string[] c;
+                        if (b[0].Contains("-"))
+                        {
+                            c = b[0].Split('-');
+                        }
+                        else
+                        {
+                            dataGridView1.Rows.Clear();//清空数据
+                            MessageBox.Show("文件" + b[0] + "的命名规则不正确");
+                            return;
+                        }
+                        i++;
+                        string x = MyDictionary(c[1]);
+                        string[] d = { i.ToString(), comboBox1.Text, c[0], x, item };
+
+                        dataGridView1.Rows.Add(d);
+                        //MessageBox.Show(item);
+                        //foreach (string d in c)
+                        //{
+                        //    MessageBox.Show(d);
+                        //}
+
+                    }
+                }
+            }
+            else
+            {
+                MessageBox.Show("请选择商家！", "错误");
+                return;
+            }
+        }
+        #endregion
+
+        #region 主窗体加载
+        /// <summary>
+        /// 主窗体加载
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void FormMain_Load(object sender, EventArgs e)
+        {
+            dateTimePicker1.Value = DateTime.Now.Date;
+            this.Text +="-"+ FormLogin.usersite;
+            using (SqlConnection conn = new SqlConnection(connStr))
+            {
+                string sql = "select * from TSite ";
+                using (SqlCommand cmd = new SqlCommand(sql, conn))
+                {
+                    conn.Open();
+                    using (SqlDataReader sdr = cmd.ExecuteReader())
+                    {
+                        if (sdr.HasRows)
+                        {
+                            File.Delete(str);
+                            string txt = "";
+
+                            //读取数据库中Tsite中的值，保存在huiwen.ini中
+                            while (sdr.Read())
+                            {
+                                string read = sdr.GetString(0) + "," + sdr.GetString(1) + "\r\n";
+                                txt += read;
+                                File.WriteAllText(str, txt);
+                                comboBox3.Items.Add(sdr.GetString(0));
+                            }
+
+                            //判断登录权限，权限设置非“0”则移除导入选项
+                            if (FormLogin.authority != 0)
+                            {
+                                this.tabControl1.TabPages.Remove(this.tabPage1);
+                                comboBox2.SelectedIndex = 0;
+                                btnDelete.Visible = false;
+                                if (FormLogin.usersite == "总部")
+                                {
+                                    comboBox3.SelectedIndex = 0;
+                                }
+
+                                else
+                                {
+                                    comboBox3.Items.Clear();
+                                    comboBox3.Items.Add(FormLogin.usersite);
+                                    comboBox3.SelectedIndex = 0;
+                                }
+                            }
+                            else
+                            {
+                                comboBox2.SelectedIndex = 0;
+                                comboBox3.SelectedIndex = 0;
+                            }
+
+                            conn.Close();
+                        }
+                        else
+                        {
+                            MessageBox.Show("程序加载时出错，将自动关闭！", "错误");
+                            Application.Exit();
+                        }
+                    }
+                }
+            }
+
+
+        }
+        #endregion
+
+        #region 键值字典
+        /// <summary>
+        /// 键值字典，通过传送的站点代码返回站点名称
+        /// </summary>
+        /// <param name="v"></param>
+        /// <returns></returns>
+        private string MyDictionary(string v)
+        {
+            Dictionary<string, string> dict = new Dictionary<string, string>();
+            StreamReader sr = new StreamReader(str);
+            string temp = null;
+            string b = "";
+            while ((temp = sr.ReadLine()) != null)
+            {
+                string[] a = temp.Split(',');
+                dict.Add(a[1], a[0]);
+            }
+            if (dict.ContainsKey(v))
+            {
+                b = dict[v];
+                return b;
+            }
+            else
+            {
+                return v + "无此对应站点，请检查文件名！";
+            }
+        }
+        #endregion
+
+        #region 当上传被单击
+        /// <summary>
+        /// 当上传被单击
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void btnUpload_Click(object sender, EventArgs e)
+        {
+            if (dataGridView1.RowCount > 1)
+            {
+                for (int i = 0; i < dataGridView1.RowCount; i++)
+                {
+                    //MessageBox.Show(dataGridView1[4, i].Value.ToString());
+                    if (dataGridView1[3, i].Value.ToString().Contains("无此对应站点，请检查文件名！"))
+                    {
+                        MessageBox.Show("单号为" + dataGridView1[2, i].Value.ToString() + "的站点代码填写错误，请更改后从新加载！", "错误");
+                        return;
+                    }
+
+                    //判断是否有重复MD5值，是否重复导入
+                    else if (GetMD5HashFromFile(dataGridView1[4, i].Value.ToString()) == SqlMd5(dataGridView1[2, i].Value.ToString()))
+                    {
+                        MessageBox.Show("请不重复上传！", "错误");
+                        return;
+                    }
+
+                }
+
+                for (int i = 0; i < dataGridView1.RowCount; i++)
+                {
+                    try
+                    {
+                        string ftpuri = UploadFile(dataGridView1[2, i].Value.ToString(), dataGridView1[4, i].Value.ToString());
+                        string md5 = GetMD5HashFromFile(dataGridView1[4, i].Value.ToString());
+                        Insert(dataGridView1[1, i].Value.ToString(), dataGridView1[2, i].Value.ToString(), dataGridView1[3, i].Value.ToString(), 0, DateTime.Now, ftpuri, md5);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(ex.Message);
+                    }
+
+                }
+                MessageBox.Show("上传成功");
+            }
+            else
+            {
+                MessageBox.Show("请先选择文件", "提示");
+            }
+        }
+        #endregion
+
+        #region FTP上传方法
+        /// <summary>
+        /// FTP上传方法
+        /// </summary>
+        /// <param name="name">文件名</param>
+        /// <param name="turl">文件本地路径</param>
+        public string UploadFile(string name, string turl)
+        {
+            //WebClient wc = new WebClient();
+            //string url = "ftp://" + ftphost + "/" + ftpurl;
+
+            //FtpWebRequest ftp = new FtpWebRequest();
+            //ftp.GetRequestStream(url,ftpuser,ftppwd);
+            string bnumDire = "ftp://" + ftphost + "/" + DateTime.Now.ToLongDateString().ToString() + "/";
+            if (!(Directory.Exists(bnumDire)))//判断是否包含文件夹，若没有则新建
+            {
+                //Directory.CreateDirectory(bnumDire);
+                FtpWebRequest frequest = (FtpWebRequest)FtpWebRequest.Create(new Uri(bnumDire));
+                frequest.Credentials = new NetworkCredential(ftpuser, ftppwd);
+                frequest.Method = WebRequestMethods.Ftp.MakeDirectory;
+                try
+                {
+                    //判断是否包含该文件夹，若没有则新建，若有则抛错，不处理
+                    FtpWebResponse response = frequest.GetResponse() as FtpWebResponse;
+                }
+                catch { }
+            }
+
+
+            //progressBar1.Maximum = 100;
+            //progressBar1.Minimum = 0;
+
+            FileInfo fin = new FileInfo(turl);
+            string uri = bnumDire + name + ".pdf";
+            FtpWebRequest reqFtp;
+            reqFtp = (FtpWebRequest)FtpWebRequest.Create(uri);
+            reqFtp.UseBinary = true;
+            reqFtp.Credentials = new NetworkCredential(ftpuser, ftppwd);
+            reqFtp.KeepAlive = false;
+            reqFtp.Method = WebRequestMethods.Ftp.UploadFile;
+            reqFtp.ContentLength = fin.Length;
+            progressBar1.Minimum = 0;
+            progressBar1.Maximum =(int)reqFtp.ContentLength;
+            int buffLength = 1024;
+            byte[] buff = new byte[buffLength];
+            int contentLen;
+            FileStream fs = fin.OpenRead();
+            Stream strm = reqFtp.GetRequestStream();
+            contentLen = fs.Read(buff, 0, buffLength);
+            while (contentLen != 0)
+            {
+                strm.Write(buff, 0, buffLength);
+                contentLen = fs.Read(buff, 0, buffLength);
+                if (contentLen != 0)
+                {
+                    progressBar1.Value = progressBar1.Maximum / contentLen;
+                }
+                else
+                { progressBar1.Value = progressBar1.Maximum ; }
+            }
+            //progressBar1.Value += 25;
+            strm.Close();
+            fs.Close();
+            return uri;
+        }
+        #endregion
+
+        #region 增加订单信息
+        /// <summary>
+        /// 增加订单信息
+        /// </summary>
+        /// <param name="merchant">商家</param>
+        /// <param name="number">单号</param>
+        /// <param name="site">站点</param>
+        /// <param name="print">是否打印</param>
+        /// <param name="time">上传时间</param>
+        /// <param name="url">资源路径</param>
+        private void Insert(string merchant, string number, string site, int print, DateTime time, string url, string tmd5)
+        {
+            using (SqlConnection conn = new SqlConnection(connStr))
+            {
+                string sql = "insert into Treturninfo(Tmerchant,Tnumber,Tsite,Tprint,Ttime,Turl,Tmd5) values (@merchant,@number,@site,@print,@time,@url,@md5) ";
+                SqlParameter[] param = { new SqlParameter("@merchant", merchant), new SqlParameter("@number", number), new SqlParameter("@site", site), new SqlParameter("@print", print), new SqlParameter("@time", time), new SqlParameter("@url", url), new SqlParameter("@md5", tmd5) };
+                using (SqlCommand cmd = new SqlCommand(sql, conn))
+                {
+                    conn.Open();
+                    cmd.Parameters.AddRange(param);
+                    if (cmd.ExecuteNonQuery() == 0)
+                    {
+                        MessageBox.Show("出现未知错误" + number + "数据添加失败", "错误");
+                    }
+
+                }
+            }
+        }
+        #endregion
+
+        #region 获取文件上传之前的MD5
+        /// <summary>
+        /// 获取文件上传之前的MD5值，判断是否重复
+        /// </summary>
+        /// <param name="fileName"></param>
+        /// <returns></returns>
+        private static string GetMD5HashFromFile(string fileName)
+        {
+            try
+            {
+                FileStream file = new FileStream(fileName, FileMode.Open);
+                System.Security.Cryptography.MD5 md5 = new System.Security.Cryptography.MD5CryptoServiceProvider();
+                byte[] retVal = md5.ComputeHash(file);
+                file.Close();
+
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < retVal.Length; i++)
+                {
+                    sb.Append(retVal[i].ToString("x2"));
+                }
+                return sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                throw new Exception("GetMD5HashFromFile() fail,error:" + ex.Message);
+            }
+        }
+        #endregion
+
+        #region 获取数据库中的MD5值
+        /// <summary>
+        /// 获取数据库中的MD5值
+        /// </summary>
+        /// <param name="number"></param>
+        /// <returns></returns>
+        private string SqlMd5(string number)
+        {
+            string sql = "select Tmd5 from Treturninfo where Tnumber='" + number + "'";
+            using (SqlConnection conn = new SqlConnection(connStr))
+            {
+                using (SqlCommand cmd = new SqlCommand(sql, conn))
+                {
+                    conn.Open();
+                    using (SqlDataReader sdr = cmd.ExecuteReader())
+                    {
+                        if (sdr.Read())
+                        {
+                            return sdr.GetString(0);
+                        }
+                        else
+                        {
+                            return null;
+                        }
+                    }
+                }
+            }
+        }
+        #endregion
+
+        #region 当查询被单击
+        /// <summary>
+        /// 当查询被单击
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void btnRefer_Click(object sender, EventArgs e)
+        {
+            string sql;
+            if (txtNumber.Text == "")
+            {
+                string a = "'" + dateTimePicker1.Text + "'";
+                string b = "'" + dateTimePicker2.Text + "'";
+
+                if (comboBox2.Text == "全部")//若商家选择的是全部
+                {
+                    if (comboBox3.Text == "全部")//若站点选择的是全部
+                    {
+                        sql = "select * from Treturninfo where Ttime>" + a + " and Ttime<" + b;
+                        Refer(sql);
+                    }
+                    else if (comboBox3.Text == "县城(需打印)")
+                    {
+                        sql = "select * from Treturninfo where Ttime>" + a + " and Ttime<" + b + "and Tsite !='' and Tsite !='蜀山站' and Tsite !='瑶海站' and Tsite !='包河站' and Tsite !='庐阳站' and Tsite !='高新站' and Tsite !='经开站' and Tsite !='中心站' and Tsite !='肥东站' and Tsite !='肥西站' and Tsite !='蚌埠站' and Tsite !='淮南站' and Tsite !='阜阳站' and Tsite !='淮北站' and Tsite !='芜湖站' and Tsite !='池州站' and Tsite !='马鞍山站' and Tsite !='六安站' and Tsite !='安庆站' and Tsite !='巢湖站' and Tsite !='滁州站' and Tsite !='黄山站' and Tsite !='亳州站' and Tsite !='铜陵站' and Tsite !='宣城站' and Tsite !='宿州站'";
+                        Refer(sql);
+                    }
+                    else
+                    {
+                        sql = "select * from Treturninfo where Ttime>" + a + " and Ttime<" + b + "and Tsite='" + comboBox3.Text + "'";
+                        Refer(sql);
+                    }
+                }
+                else//如果商家不是选择的 全部
+                {
+                    if (comboBox3.Text == "全部")
+                    {
+                        sql = "select * from Treturninfo where Ttime>" + a + " and Ttime<" + b + "and Tmerchant='" + comboBox2.Text + "'";
+                        Refer(sql);
+                    }
+                    else if (comboBox3.Text == "县城(需打印)")
+                    {
+                        sql = "select * from Treturninfo where Ttime>" + a + " and Ttime<" + b + "and Tsite !='' and Tsite !='蜀山站' and Tsite !='瑶海站' and Tsite !='包河站' and Tsite !='庐阳站' and Tsite !='高新站' and Tsite !='经开站' and Tsite !='中心站' and Tsite !='肥东站' and Tsite !='肥西站' and Tsite !='蚌埠站' and Tsite !='淮南站' and Tsite !='阜阳站' and Tsite !='淮北站' and Tsite !='芜湖站' and Tsite !='池州站' and Tsite !='马鞍山站' and Tsite !='六安站' and Tsite !='安庆站' and Tsite !='巢湖站' and Tsite !='滁州站' and Tsite !='黄山站' and Tsite !='亳州站' and Tsite !='铜陵站' and Tsite !='宣城站' and Tsite !='宿州站'";
+                        Refer(sql);
+                    }
+                    else//若商家与站点都不是选择的全部
+                    {
+                        sql = "select * from Treturninfo where Ttime>" + a + " and Ttime<" + b + "and Tmerchant='" + comboBox2.Text + "'" + "and Tsite='" + comboBox3.Text + "'";
+                        Refer(sql);
+                    }
+                }
+            }
+            else
+            {
+                sql = "select * from Treturninfo where Tnumber='" + txtNumber.Text.Trim() + "'";
+                Refer(sql);
+            }
+        }
+        #endregion
+
+        #region 数据查询方法
+        public void Refer(string sql)
+        {
+            if (checkBox1.Checked)
+            {
+                sql += "and Tprint=0";
+            }
+            using (SqlConnection conn = new SqlConnection(connStr))
+            {
+                using (SqlCommand cmd = new SqlCommand(sql, conn))
+                {
+                    try
+                    {
+                        conn.Open();
+                    }
+                    catch (Exception)
+                    {
+                        MessageBox.Show("查询失败，请重试", "提示");
+                        return;
+                    }
+                    using (SqlDataReader sdr = cmd.ExecuteReader())
+                    {
+                        if (sdr.HasRows)
+                        {
+                            int i = 0;
+                            dataGridView2.Rows.Clear();
+                            while (sdr.Read())
+                            {
+                                string print;//判断是否打印
+                                i++;
+                                if (sdr.GetInt32(4) == 0)
+                                {
+                                    print = "否";
+                                }
+                                else if (sdr.GetInt32(4) == 1)
+                                {
+                                    print = "是";
+                                }
+                                else
+                                {
+                                    print = "未知";
+                                }
+                                object[] tim = { true, i, sdr.GetString(1), sdr.GetString(2), sdr.GetString(3), sdr.GetDateTime(5).ToString(), print, sdr.GetString(6) };
+
+                                dataGridView2.Rows.Add(tim);
+                            }
+                        }
+                        else
+                        {
+                            MessageBox.Show("查无数据", "提示");
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+        #endregion
+
+        #region 全选、反选按钮
+        /// <summary>
+        /// 全选项
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void label7_Click(object sender, EventArgs e)
+        {
+            for (int i = 0; i < dataGridView2.RowCount; i++)
+            {
+                dataGridView2[0, i].Value = true;
+            }
+        }
+
+
+        /// <summary>
+        /// 反选项
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void label8_Click(object sender, EventArgs e)
+        {
+            for (int i = 0; i < dataGridView2.RowCount; i++)
+            {
+                if ((bool)dataGridView2[0, i].Value)
+                {
+                    dataGridView2[0, i].Value = false;
+                }
+                else if (!(bool)dataGridView2[0, i].Value)
+                {
+                    dataGridView2[0, i].Value = true;
+                }
+            }
+        }
+        #endregion
+
+        #region 下载按钮被单击
+        /// <summary>
+        /// 当下载按钮被单击
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void btnDownload_Click(object sender, EventArgs e)
+        {
+            string str;
+            int a = 0;
+            for (int i = 0; i < dataGridView2.RowCount; i++)
+            {
+                if ((bool)dataGridView2[0, i].Value)
+                {
+                    a++;
+                }
+            }
+            if (a == 0)
+            {
+                MessageBox.Show("请选择要下载的文件", "提示");
+            }
+            else
+            {
+                folderBrowserDialog1.Description = "请选择存放目录";
+                folderBrowserDialog1.RootFolder = System.Environment.SpecialFolder.Desktop;
+                if (folderBrowserDialog1.ShowDialog() == DialogResult.OK)
+                {
+                    str = folderBrowserDialog1.SelectedPath + "\\";
+
+                    for (int i = 0; i < dataGridView2.RowCount; i++)
+                    {
+
+                        if ((bool)dataGridView2[0, i].Value)
+                        {
+                            try
+                            {
+                                DownloadFile(str, dataGridView2[7, i].Value.ToString(), dataGridView2[3, i].Value.ToString());
+                                UpPrint(dataGridView2[3,i].Value.ToString());
+                            }
+
+
+                            catch (Exception ex)
+                            {
+                                MessageBox.Show(ex.Message);
+                            }
+                        }
+                    }
+                    MessageBox.Show("下载成功", "提示");
+                }
+            }
+        } 
+        #endregion
+
+        #region 下载方法
+        /// <summary>
+        /// 下载方法
+        /// </summary>
+        /// <param name="localDir"></param>
+        /// <param name="FtpDir"></param>
+        /// <param name="name"></param>
+        public void DownloadFile(string localDir, string FtpDir, string name)
+        {
+
+            FtpWebRequest reqFtp = (FtpWebRequest)FtpWebRequest.Create(new Uri(FtpDir));
+            reqFtp.UseBinary = true;
+            reqFtp.Credentials = new NetworkCredential(ftpuser, ftppwd);
+            FtpWebResponse response = (FtpWebResponse)reqFtp.GetResponse();
+            Stream ftpStream = response.GetResponseStream();
+            long cl = response.ContentLength;
+            int bufferSize = 1024;
+            int readCount;
+            byte[] buffer = new byte[bufferSize];
+            readCount = ftpStream.Read(buffer, 0, bufferSize);
+            string newDir = localDir + name + ".pdf";
+            FileStream outputStream = new FileStream(newDir, FileMode.Create);
+            while (readCount > 0)
+            {
+                outputStream.Write(buffer, 0, readCount);
+                readCount = ftpStream.Read(buffer, 0, bufferSize);
+                if (readCount != 0)
+                {
+                    progressBar1.Value = progressBar1.Maximum / readCount ;
+                }
+                else
+                { progressBar1.Value = 100; }
+            }
+            ftpStream.Close();
+            outputStream.Close();
+            response.Close();
+
+
+        } 
+        #endregion
+
+        #region 更改打印状态
+        /// <summary>
+        /// 更改打印状态
+        /// </summary>
+        /// <param name="number"></param>
+        public void UpPrint(string number)
+        {
+            using (SqlConnection conn = new SqlConnection(connStr))
+            {
+                string sqlUpdate = "update Treturninfo set Tprint =1 where Tnumber ='" + number + "'";
+                SqlCommand cmd = new SqlCommand(sqlUpdate, conn);
+                conn.Open();
+                cmd.ExecuteNonQuery();
+            }
+        } 
+        #endregion
+
+        #region 菜单
+        private void 修改密码ToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            FormPwdChange pwdchange = new FormPwdChange();
+            pwdchange.Show();
+        }
+
+        private void 退出ToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            Application.Exit();
+        } 
+        #endregion
+
+        private void 关于ToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            FormAbout fa = new FormAbout();
+            fa.Show();
+        }
+
+    }
+}
+
